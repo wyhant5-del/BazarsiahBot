@@ -7,7 +7,7 @@ from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 
-API_TOKEN = '8967480237:AAG5vHg04VHi_ybk3ztSzZ5lvwTkCl9Eg-Q'  # توکن جدید خود را اینجا بگذارید
+API_TOKEN = '8967480237:AAG5vHg04VHi_ybk3ztSzZ5lvwTkCl9Eg-Q'  # توکن اصلی ربات خود را اینجا بگذارید
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
@@ -44,7 +44,6 @@ def get_player(user_id):
         return (user_id, 50000, 0, 0)
     return player
 
-# کیبورد بازی در گروه
 def group_game_keyboard():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -54,13 +53,11 @@ def group_game_keyboard():
     )
     return kb
 
-# مدیریت دستور /start
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
     get_player(user_id)
     
-    # اگر پیام در پیوی ارسال شده باشد
     if message.chat.type == types.ChatType.PRIVATE:
         me = await bot.get_me()
         text = (
@@ -72,12 +69,9 @@ async def start_cmd(message: types.Message):
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("➕ افزودن ربات به گروه", url=f"https://t.me/{me.username}?startgroup=true"))
         await message.reply(text, reply_markup=kb, parse_mode="Markdown")
-        
-    # اگر پیام داخل گروه ارسال شده باشد
     else:
         await message.reply("💵 **بازی بازار سیاه در این گروه فعال است!**\nاز دکمه‌های زیر برای بازی استفاده کنید:", reply_markup=group_game_keyboard(), parse_mode="Markdown")
 
-# مدیریت کلیک روی دکمه‌ها
 @dp.callback_query_handler(lambda c: True)
 async def process_callback(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
@@ -142,7 +136,7 @@ async def process_callback(callback_query: types.CallbackQuery):
             conn.commit()
             await callback_query.answer(f"🚔 پلیس دستگیرت کرد! {fine:,} جریمه شدی.", show_alert=True)
 
-# سرور ساختگی برای حل مشکل پورت در Render
+# وب‌سرور داخلی جهت پاس کردن Port Scan در Render
 async def handle(request):
     return web.Response(text="Bot is running!")
 

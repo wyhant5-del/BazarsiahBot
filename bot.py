@@ -5,7 +5,8 @@ import subprocess
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
-BOT_TOKEN = os.environ.get("8895497755:AAGbvTc4bjF8djvpbqsW5WOgboxdQtSNvGU")
+# توکن به صورت مستقیم و بدون os.environ.get قرار داده شد
+BOT_TOKEN = "8095497755:AAGbvTc4bjFBdjvpbgskMSOgboxdQtSNvGU"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -24,11 +25,11 @@ async def handle_video(message: Message):
         # دانلود فایل از تلگرام
         await bot.download_file(file_info.file_path, input_path)
         
-        # اجرا دستور FFmpeg برای فشرده‌سازی
+        # اجرای دستور FFmpeg برای فشرده‌سازی
         cmd = f'ffmpeg -y -i "{input_path}" -vcodec libx264 -crf 28 "{output_path}"'
         subprocess.run(cmd, shell=True, check=True)
         
-        # ارسال ویدیو فشرده شده
+        # ارسال ویدیوی فشرده‌شده
         with open(output_path, "rb") as video_file:
             await message.reply_video(video=video_file, caption="ویدیو با موفقیت فشرده شد!")
             

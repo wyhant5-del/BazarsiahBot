@@ -1,11 +1,11 @@
 import os
 import subprocess
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, BotCommand
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 API_ID = int(os.environ.get("API_ID", "1234567"))
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8895497755:AAGbvTc4bjF8djvpbqsW5WOgboxdQtSNvGU") # توکن خودت
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
 
 app = Client("CompressorBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 USER_SETTINGS = {}
@@ -17,14 +17,6 @@ async def progress(current, total, message, status_text):
             await message.edit_text(f"⏳ {status_text}\n📊 پیشرفت: {percent:.1f}%")
         except Exception:
             pass
-
-@app.on_start()
-async def set_commands(client):
-    await client.set_bot_commands([
-        BotCommand("compress", "فشرده‌سازی ویدیو (روی فایل ریپلای کنید)"),
-        BotCommand("settings", "تنظیم کیفیت فشرده‌سازی"),
-        BotCommand("help", "راهنمای استفاده")
-    ])
 
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message: Message):

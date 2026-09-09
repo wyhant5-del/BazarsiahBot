@@ -7,7 +7,8 @@ from aiogram.types import Message
 from aiogram.filters import CommandStart
 from aiohttp import web
 
-BOT_TOKEN = "8895497755:AAHB0vu6b-fyamZGlfbuvnUv1qyYdYsxalA"
+# توکن جدید
+BOT_TOKEN = "8895497755:AAEAjZeyp6x_Vt_NPTQrgM0K8kP1l7ZnHbE"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -24,7 +25,6 @@ async def send_welcome(message: Message):
 
 @dp.message(F.video | F.document)
 async def handle_video(message: Message):
-    # بررسی نوع فایل و حجم
     video_obj = message.video or message.document
     if message.document and not (message.document.mime_type and message.document.mime_type.startswith("video/")):
         await message.reply("⚠️ لطفاً فقط فایل ویدیویی ارسال کنید.")
@@ -46,7 +46,6 @@ async def handle_video(message: Message):
         orig_size = get_file_size_mb(input_path)
         await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
 
-        # دستور ffmpeg بهینه شده برای سرعت بالا در Render
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264', '-crf', '26', '-preset', 'ultrafast',
@@ -59,7 +58,6 @@ async def handle_video(message: Message):
             stderr=asyncio.subprocess.PIPE
         )
 
-        # خواندن خروجی جهت درصد پیشرفت
         last_update_time = 0
         duration = None
 
@@ -69,21 +67,18 @@ async def handle_video(message: Message):
                 break
             line_str = line.decode('utf-8', errors='ignore')
 
-            # استخراج مدت زمان کل ویدیو
             if not duration:
                 dur_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", line_str)
                 if dur_match:
                     h, m, s = map(float, dur_match.groups())
                     duration = h * 3600 + m * 60 + s
 
-            # استخراج زمان فعلی پردازش
             time_match = re.search(r"time=(\d+):(\d+):(\d+\.\d+)", line_str)
             if time_match and duration and duration > 0:
                 h, m, s = map(float, time_match.groups())
                 elapsed = h * 3600 + m * 60 + s
                 percent = min(100, int((elapsed / duration) * 100))
 
-                # بروزرسانی پیام هر ۳ ثانیه یک‌بار جهت جلوگیری از کنترل سرعت تلگرام
                 now = asyncio.get_event_loop().time()
                 if now - last_update_time > 3:
                     last_update_time = now
@@ -123,7 +118,6 @@ async def handle_video(message: Message):
         if os.path.exists(input_path): os.remove(input_path)
         if os.path.exists(output_path): os.remove(output_path)
 
-# وب‌سرور فرضی برای نگهداری پورت
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 

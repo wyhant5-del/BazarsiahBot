@@ -19,7 +19,7 @@ def get_file_size_mb(file_path):
 async def send_welcome(message: Message):
     await message.reply(
         "👋 **به ربات فشرده‌ساز ویدیو خوش آمدید!**\n\n"
-        "🎬 ویدیوی خود را ارسال کنید (حداکثر ۵۰ مگابایت) تا بدون افت کیفیت محسوس فشرده شود."
+        "🎬 ویدیوی خود را ارسال کنید (حداکثر ۵۰ مگابایت) تا فشرده‌سازی انجام شود."
     )
 
 @dp.message(F.video | F.document)
@@ -30,7 +30,7 @@ async def handle_video(message: Message):
         return
 
     if video_obj.file_size > 50 * 1024 * 1024:
-        await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است. محدودیت ربات‌های تلگرام ۵۰ مگابایت می‌باشد.")
+        await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است.")
         return
 
     status_msg = await message.reply("📥 **در حال دریافت ویدیو از تلگرام...**")
@@ -45,10 +45,15 @@ async def handle_video(message: Message):
         orig_size = get_file_size_mb(input_path)
         await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
 
+        # تنظیمات ffmpeg هوشمند جهت کاهش قطعی حجم و حفظ سرعت
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
-            '-vcodec', 'libx264', '-crf', '26', '-preset', 'ultrafast',
-            '-acodec', 'aac', output_path
+            '-vcodec', 'libx264',
+            '-crf', '28',
+            '-preset', 'veryfast',
+            '-vf', "scale='min(1280,iw)':-2",  # تغییر سایز حداکثر به 720p در صورت بزرگتر بودن
+            '-acodec', 'aac', '-b:a', '128k',
+            output_path
         ]
 
         process = await asyncio.create_subprocess_exec(
@@ -93,7 +98,15 @@ async def handle_video(message: Message):
 
         if os.path.exists(output_path):
             new_size = get_file_size_mb(output_path)
-            saved = max(0, int(((orig_size - new_size) / orig_size) * 100))
+            
+            # اگر به هر دلیلی حجم ویدیو خروجی بیشتر شد، همان فایل اصلی ارسال شود
+            if new_size >= orig_size:
+                final_file_path = input_path
+                saved = 0
+                new_size = orig_size
+            else:
+                final_file_path = output_path
+                saved = int(((orig_size - new_size) / orig_size) * 100)
 
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
@@ -104,9 +117,8 @@ async def handle_video(message: Message):
                 f"⚡ میزان کاهش حجم: `{saved}%`"
             )
             
-            # ارسال فایل با الگوی استاندارد aiogram 3
-            video_file = FSInputFile(output_path)
-            await message.reply_video(video=video_file, caption=caption)
+            video_file = FSInputFile(final_file_path)
+            await message.reply_video(video=video_file, caption=caption, parse_mode="Markdown")
         else:
             await message.reply("❌ خطا در ایجاد فایل خروجی.")
 
@@ -137,4 +149,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

@@ -3,9 +3,9 @@ import subprocess
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, BotCommand
 
-API_ID = int(os.environ.get("API_ID", 1234567))
+API_ID = int(os.environ.get("API_ID", "1234567"))
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8895497755:AAGbvTc4bjF8djvpbqsW5WOgboxdQtSNvGU")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8895497755:AAGbvTc4bjF8djvpbqsW5WOgboxdQtSNvGU") # توکن خودت
 
 app = Client("CompressorBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 USER_SETTINGS = {}
@@ -15,7 +15,7 @@ async def progress(current, total, message, status_text):
     if int(percent) % 20 == 0:
         try:
             await message.edit_text(f"⏳ {status_text}\n📊 پیشرفت: {percent:.1f}%")
-        except:
+        except Exception:
             pass
 
 @app.on_start()

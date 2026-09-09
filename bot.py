@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
 # توکن به صورت مستقیم و بدون os.environ.get قرار داده شد
-BOT_TOKEN = "8095497755:AAGbvTc4bjFBdjvpbgskMSOgboxdQtSNvGU"
+BOT_TOKEN = "8895497755:AAHB0vu6b-fyamZGlfbuvnUv1qyYdYsxalA"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()

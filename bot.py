@@ -1,155 +1,84 @@
-import asyncio
 import os
-import random
-import sqlite3
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiohttp import web
+import subprocess
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, BotCommand
 
-API_TOKEN = '8967480237:AAG5vHg04VHi_ybk3ztSzZ5lvwTkCl9Eg-Q'  # توکن اصلی ربات خود را اینجا بگذارید
+API_ID = int(os.environ.get("API_ID", 1234567))
+API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8895497755:AAGbvTc4bjF8djvpbqsW5WOgboxdQtSNvGU")
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+app = Client("CompressorBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+USER_SETTINGS = {}
 
-# ساخت و اتصال به دیتابیس
-conn = sqlite3.connect('trade_game.db', check_same_thread=False)
-cursor = conn.cursor()
+async def progress(current, total, message, status_text):
+    percent = (current / total) * 100
+    if int(percent) % 20 == 0:
+        try:
+            await message.edit_text(f"⏳ {status_text}\n📊 پیشرفت: {percent:.1f}%")
+        except:
+            pass
 
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS players (
-        user_id INTEGER PRIMARY KEY,
-        cash INTEGER DEFAULT 50000,
-        crypto INTEGER DEFAULT 0,
-        gold INTEGER DEFAULT 0
-    )
-''')
-conn.commit()
+@app.on_start()
+async def set_commands(client):
+    await client.set_bot_commands([
+        BotCommand("compress", "فشرده‌سازی ویدیو (روی فایل ریپلای کنید)"),
+        BotCommand("settings", "تنظیم کیفیت فشرده‌سازی"),
+        BotCommand("help", "راهنمای استفاده")
+    ])
 
-market_prices = {
-    "crypto": 10000,
-    "gold": 25000
-}
+@app.on_message(filters.command("start"))
+async def start_cmd(client, message: Message):
+    await message.reply_text("👋 سلام! ویدیو بفرست یا توی گروه روی یک ویدیو ریپلای کن و /compress رو بزن.")
 
-def update_market():
-    market_prices["crypto"] = max(2000, market_prices["crypto"] + random.randint(-1500, 2000))
-    market_prices["gold"] = max(5000, market_prices["gold"] + random.randint(-3000, 3500))
+@app.on_message(filters.command("settings"))
+async def settings_cmd(client, message: Message):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("کم‌حجم (CRF 28)", callback_data="quality_28")],
+        [InlineKeyboardButton("تعادل عالی (CRF 24)", callback_data="quality_24")],
+        [InlineKeyboardButton("کیفیت بالا (CRF 20)", callback_data="quality_20")]
+    ])
+    await message.reply_text("⚙️ کیفیت فشرده‌سازی رو انتخاب کن:", reply_markup=keyboard)
 
-def get_player(user_id):
-    cursor.execute('SELECT * FROM players WHERE user_id = ?', (user_id,))
-    player = cursor.fetchone()
-    if not player:
-        cursor.execute('INSERT INTO players (user_id) VALUES (?)', (user_id,))
-        conn.commit()
-        return (user_id, 50000, 0, 0)
-    return player
+@app.on_callback_query(filters.regex(r"^quality_"))
+async def set_quality(client, callback):
+    crf = callback.data.split("_")[1]
+    USER_SETTINGS[callback.from_user.id] = crf
+    await callback.message.edit_text(f"✅ کیفیت تنظیم شد روی: {crf}")
 
-def group_game_keyboard():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("💼 کیف پول من", callback_data="profile"),
-        InlineKeyboardButton("📈 بازار سیاه", callback_data="market"),
-        InlineKeyboardButton("🎰 دزدی و ریسک", callback_data="rob")
-    )
-    return kb
+@app.on_message(filters.command("compress") | (filters.private & (filters.video | filters.document)))
+async def compress_handler(client, message: Message):
+    target_msg = message.reply_to_message if message.reply_to_message else message
 
-@dp.message_handler(commands=['start'])
-async def start_cmd(message: types.Message):
-    user_id = message.from_user.id
-    get_player(user_id)
-    
-    if message.chat.type == types.ChatType.PRIVATE:
-        me = await bot.get_me()
-        text = (
-            f"👋 **سلام به ربات بازی بازار سیاه خوش آمدی!**\n\n"
-            f"📖 **راهنمای بازی:**\n"
-            f"این یک بازی گروهی رقابتی است. شما می‌توانید ربات را به گروه‌های خود اضافه کنید و با بقیه اعضا به تجارت، خرید و فروش ارز و دزدی بپردازید.\n\n"
-            f"🌐 **ویژگی مهم:** تمام دارایی‌ها و سکه‌های شما بین تمام گروه‌ها مشترک و یکسان است!"
+    if not (target_msg.video or (target_msg.document and target_msg.document.mime_type and target_msg.document.mime_type.startswith("video/"))):
+        await message.reply_text("❌ لطفاً دستور /compress رو روی یک ویدیو ریپلای کن.")
+        return
+
+    status_msg = await message.reply_text("📥 در حال دانلود فایل...")
+    crf_val = USER_SETTINGS.get(message.from_user.id, "26")
+
+    file_path = await target_msg.download(progress=progress, progress_args=(status_msg, "در حال دانلود..."))
+    output_path = f"compressed_{os.path.basename(file_path)}"
+    await status_msg.edit_text("⚙️ در حال فشرده‌سازی...")
+
+    ffmpeg_cmd = ["ffmpeg", "-i", file_path, "-vcodec", "libx264", "-crf", str(crf_val), "-preset", "faster", output_path, "-y"]
+
+    try:
+        subprocess.run(ffmpeg_cmd, check=True)
+        await status_msg.edit_text("📤 در حال آپلود...")
+        await client.send_video(
+            chat_id=message.chat.id,
+            video=output_path,
+            caption="✅ ویدیو با موفقیت فشرده شد!",
+            reply_to_message_id=message.id,
+            progress=progress,
+            progress_args=(status_msg, "در حال آپلود...")
         )
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("➕ افزودن ربات به گروه", url=f"https://t.me/{me.username}?startgroup=true"))
-        await message.reply(text, reply_markup=kb, parse_mode="Markdown")
-    else:
-        await message.reply("💵 **بازی بازار سیاه در این گروه فعال است!**\nاز دکمه‌های زیر برای بازی استفاده کنید:", reply_markup=group_game_keyboard(), parse_mode="Markdown")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ خطا: {str(e)}")
+    finally:
+        if os.path.exists(file_path): os.remove(file_path)
+        if os.path.exists(output_path): os.remove(output_path)
+        await status_msg.delete()
 
-@dp.callback_query_handler(lambda c: True)
-async def process_callback(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    data = callback_query.data
-    _, cash, crypto, gold = get_player(user_id)
-
-    if data == "profile":
-        text = (
-            f"👤 **دارایی‌های کاربر {callback_query.from_user.first_name}:**\n\n"
-            f"💰 پول نقد: {cash:,} تومان\n"
-            f"🪙 ارز دیجیتال: {crypto} واحد\n"
-            f"🥇 شمش طلا: {gold} عدد"
-        )
-        await callback_query.answer()
-        await bot.send_message(callback_query.message.chat.id, text, parse_mode="Markdown")
-
-    elif data == "market":
-        update_market()
-        text = (
-            f"📈 **قیمت‌های لحظه‌ای بازار:**\n\n"
-            f"🪙 ارز دیجیتال: {market_prices['crypto']:,} تومان\n"
-            f"🥇 شمش طلا: {market_prices['gold']:,} تومان\n\n"
-            f"💰 پول شما: {cash:,} تومان"
-        )
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton("خرید ۱ ارز 🪙", callback_data="buy_crypto"),
-            InlineKeyboardButton("فروش ۱ ارز 🪙", callback_data="sell_crypto"),
-            InlineKeyboardButton("خرید ۱ طلا 🥇", callback_data="buy_gold"),
-            InlineKeyboardButton("فروش ۱ طلا 🥇", callback_data="sell_gold")
-        )
-        await callback_query.answer()
-        await bot.send_message(callback_query.message.chat.id, text, reply_markup=kb, parse_mode="Markdown")
-
-    elif data == "buy_crypto":
-        price = market_prices["crypto"]
-        if cash >= price:
-            cursor.execute('UPDATE players SET cash = cash - ?, crypto = crypto + 1 WHERE user_id = ?', (price, user_id))
-            conn.commit()
-            await callback_query.answer("✅ ۱ واحد ارز خریدی!", show_alert=True)
-        else:
-            await callback_query.answer("❌ پولت کافی نیست!", show_alert=True)
-
-    elif data == "sell_crypto":
-        price = market_prices["crypto"]
-        if crypto >= 1:
-            cursor.execute('UPDATE players SET cash = cash + ?, crypto = crypto - 1 WHERE user_id = ?', (price, user_id))
-            conn.commit()
-            await callback_query.answer("✅ ۱ واحد ارز فروختی!", show_alert=True)
-        else:
-            await callback_query.answer("❌ ارز دیجیتال نداری!", show_alert=True)
-
-    elif data == "rob":
-        if random.random() < 0.5:
-            win = random.randint(5000, 25000)
-            cursor.execute('UPDATE players SET cash = cash + ? WHERE user_id = ?', (win, user_id))
-            conn.commit()
-            await callback_query.answer(f"🔥 موفق شدی! {win:,} تومان دزدیدی!", show_alert=True)
-        else:
-            fine = min(cash, 10000)
-            cursor.execute('UPDATE players SET cash = cash - ? WHERE user_id = ?', (fine, user_id))
-            conn.commit()
-            await callback_query.answer(f"🚔 پلیس دستگیرت کرد! {fine:,} جریمه شدی.", show_alert=True)
-
-# وب‌سرور داخلی جهت پاس کردن Port Scan در Render
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_web_server())
-    executor.start_polling(dp, skip_updates=True, loop=loop)
+if __name__ == "__main__":
+    app.run()

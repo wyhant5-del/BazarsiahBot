@@ -5,7 +5,7 @@ import subprocess
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("8895497755:AAGbvTc4bjF8djvpbqsW5WOgboxdQtSNvGU")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()

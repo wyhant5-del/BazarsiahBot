@@ -4,13 +4,20 @@ import os
 import subprocess
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
-from aiohttp import web  # اضافه شده برای حل مشکل پورت Render
+from aiogram.filters import CommandStart
+from aiohttp import web
 
-BOT_TOKEN = "8895497755:AAHB0vu6b-fyamZGlfbuvnUv1qyYdYsxalA"
+BOT_TOKEN = "8095497755:AAGbvTc4bjFBdjvpbgskMSOgboxdQtSNvGU"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# پاسخ به دستور start/
+@dp.message(CommandStart())
+async def send_welcome(message: Message):
+    await message.reply("سلام! خوش آمدید.\nلطفاً ویدیویی که می‌خواهید فشرده شود را ارسال کنید (حداکثر ۵۰ مگابایت).")
+
+# پردازش ویدیوها
 @dp.message(F.video | F.document)
 async def handle_video(message: Message):
     status_msg = await message.reply("در حال دانلود و فشرده‌سازی ویدیو...")
@@ -36,7 +43,7 @@ async def handle_video(message: Message):
         if os.path.exists(input_path): os.remove(input_path)
         if os.path.exists(output_path): os.remove(output_path)
 
-# کدهای مربوط به گول زدن رندر جهت باز کردن پورت
+# وب‌سرور فرضی برای نگه داشتن پورت Render
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
@@ -51,7 +58,7 @@ async def start_dummy_server():
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    await start_dummy_server()  # اجرای پورت فرضی
+    await start_dummy_server()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

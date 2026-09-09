@@ -43,16 +43,17 @@ async def handle_video(message: Message):
         await bot.download_file(file_info.file_path, input_path)
         
         orig_size = get_file_size_mb(input_path)
-        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
+        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی سنگین...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
 
-        # تنظیمات ffmpeg هوشمند جهت کاهش قطعی حجم و حفظ سرعت
+        # تنظیمات برای فشرده‌سازی بسیار بالا و سرعت بیشتر
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264',
-            '-crf', '28',
-            '-preset', 'veryfast',
-            '-vf', "scale='min(1280,iw)':-2",  # تغییر سایز حداکثر به 720p در صورت بزرگتر بودن
-            '-acodec', 'aac', '-b:a', '128k',
+            '-crf', '34',                        # فشرده‌سازی شدید
+            '-b:v', '500k',                      # سقف بیت‌ریت تصویر
+            '-preset', 'ultrafast',              # حداکثر سرعت پردازش
+            '-vf', "scale='min(854,iw)':-2",    # کاهش رزولوشن به 480p برای سرعت بیشتر
+            '-acodec', 'aac', '-b:a', '64k',    # فشرده‌سازی صدا
             output_path
         ]
 
@@ -99,7 +100,6 @@ async def handle_video(message: Message):
         if os.path.exists(output_path):
             new_size = get_file_size_mb(output_path)
             
-            # اگر به هر دلیلی حجم ویدیو خروجی بیشتر شد، همان فایل اصلی ارسال شود
             if new_size >= orig_size:
                 final_file_path = input_path
                 saved = 0
@@ -111,7 +111,7 @@ async def handle_video(message: Message):
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
             caption = (
-                f"✅ **فشرده‌سازی با موفقیت انجام شد!**\n\n"
+                f"✅ **فشرده‌سازی انجام شد!**\n\n"
                 f"📦 حجم اولیه: `{orig_size:.1f} MB`\n"
                 f"📉 حجم جدید: `{new_size:.1f} MB`\n"
                 f"⚡ میزان کاهش حجم: `{saved}%`"
@@ -149,3 +149,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

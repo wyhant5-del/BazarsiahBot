@@ -3,11 +3,10 @@ import logging
 import os
 import re
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, FSInputFile
 from aiogram.filters import CommandStart
 from aiohttp import web
 
-# توکن جدید
 BOT_TOKEN = "8895497755:AAEAjZeyp6x_Vt_NPTQrgM0K8kP1l7ZnHbE"
 
 bot = Bot(token=BOT_TOKEN)
@@ -105,8 +104,9 @@ async def handle_video(message: Message):
                 f"⚡ میزان کاهش حجم: `{saved}%`"
             )
             
-            with open(output_path, "rb") as video_file:
-                await message.reply_video(video=video_file, caption=caption, parse_mode="Markdown")
+            # ارسال فایل با الگوی استاندارد aiogram 3
+            video_file = FSInputFile(output_path)
+            await message.reply_video(video=video_file, caption=caption)
         else:
             await message.reply("❌ خطا در ایجاد فایل خروجی.")
 
@@ -137,3 +137,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

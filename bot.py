@@ -16,36 +16,32 @@ def get_file_size_mb(file_path):
     return os.path.getsize(file_path) / (1024 * 1024)
 
 async def compress_and_send(message: Message, video_obj):
-    file_size_mb = video_obj.file_size / (1024 * 1024)
-    
-    # محدودیت ۵۰ مگابایت تلگرام برای ربات‌ها
     if video_obj.file_size > 50 * 1024 * 1024:
         await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است. محدودیت ربات ۵۰ مگابایت می‌باشد.")
         return
 
     status_msg = await message.reply("📥 **در حال دریافت ویدیو از تلگرام...**")
     
-    input_path = f"input_{message.from_user.id}_{video_obj.file_id[:8]}.mp4"
-    output_path = f"compressed_{message.from_user.id}_{video_obj.file_id[:8]}.mp4"
+    input_path = f"input_{message.from_user.id}_{video_obj.file_id[:6]}.mp4"
+    output_path = f"compressed_{message.from_user.id}_{video_obj.file_id[:6]}.mp4"
     
     try:
         file_info = await bot.get_file(video_obj.file_id)
-        await bot.download_file(file_info.file_path, input_path)
+        await bot.download(file=file_info, destination=input_path)
         
         orig_size = get_file_size_mb(input_path)
-        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی سنگین...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
+        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی باکیفیت...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
 
-        # تنظیمات قاطع ffmpeg برای فشرده‌سازی حتی فایل‌های کوچک و سرعت حداکثری
+        # تنظیمات بهینه جهت حفظ شفافیت تصویر و جلوگیری از پرپر زدن
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264',
-            '-maxrate', '380k',                  # سقف اجباری بیت‌ریت ویدیو برای کاهش قطعی حجم
-            '-bufsize', '760k',
-            '-crf', '32',
-            '-preset', 'ultrafast',              # سرعت فوق‌العاده بالا
-            '-tune', 'fastdecode',
-            '-vf', "scale='min(640,iw)':-2",    # مقیاس‌دهی رزولوشن
-            '-acodec', 'aac', '-b:a', '48k',    # فشرده‌سازی صدا
+            '-crf', '27',                        # کیفیت عالی و بدون افت محسوس
+            '-maxrate', '700k',                  # سقف بیت‌ریت مناسب جهت جلوگیری از خراب شدن فریم‌ها
+            '-bufsize', '1400k',
+            '-preset', 'ultrafast',              # سرعت پردازش بالا
+            '-vf', "scale='min(720,iw)':-2",    # رزولوشن استاندارد ۷۲۰p برای شفافیت کامل
+            '-acodec', 'aac', '-b:a', '96k',    
             output_path
         ]
 
@@ -92,14 +88,18 @@ async def compress_and_send(message: Message, video_obj):
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             new_size = get_file_size_mb(output_path)
             
-            # اگر حجم جدید کمتر شد از فایل جدید استفاده کن، در غیر این صورت درصد واقعی نشان بده
-            final_file_path = output_path
-            saved = max(0, int(((orig_size - new_size) / orig_size) * 100))
+            if new_size >= orig_size:
+                final_file_path = input_path
+                saved = 0
+                new_size = orig_size
+            else:
+                final_file_path = output_path
+                saved = int(((orig_size - new_size) / orig_size) * 100)
 
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
             caption = (
-                f"✅ **فشرده‌سازی انجام شد!**\n\n"
+                f"✅ **فشرده‌سازی با موفقیت انجام شد!**\n\n"
                 f"📦 حجم اولیه: `{orig_size:.1f} MB`\n"
                 f"📉 حجم جدید: `{new_size:.1f} MB`\n"
                 f"⚡ میزان کاهش حجم: `{saved}%`"
@@ -108,10 +108,10 @@ async def compress_and_send(message: Message, video_obj):
             video_file = FSInputFile(final_file_path)
             await message.reply_video(video=video_file, caption=caption, parse_mode="Markdown")
         else:
-            await message.reply("❌ خطا در پردازش فایل خروجی.")
+            await message.reply("❌ خطا در ایجاد فایل خروجی.")
 
     except Exception as e:
-        await message.reply(f"❌ **خطا در دریافت یا پردازش:** {str(e)}")
+        await message.reply(f"❌ **خطا:** {str(e)}")
 
     finally:
         try:
@@ -179,4 +179,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

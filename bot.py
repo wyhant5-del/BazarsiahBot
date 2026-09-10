@@ -16,34 +16,36 @@ def get_file_size_mb(file_path):
     return os.path.getsize(file_path) / (1024 * 1024)
 
 async def compress_and_send(message: Message, video_obj):
-    orig_size_mb = video_obj.file_size / (1024 * 1024)
+    file_size_mb = video_obj.file_size / (1024 * 1024)
     
+    # محدودیت ۵۰ مگابایت تلگرام برای ربات‌ها
     if video_obj.file_size > 50 * 1024 * 1024:
-        await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است.")
+        await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است. محدودیت ربات ۵۰ مگابایت می‌باشد.")
         return
 
     status_msg = await message.reply("📥 **در حال دریافت ویدیو از تلگرام...**")
     
-    input_path = f"input_{message.from_user.id}.mp4"
-    output_path = f"compressed_{message.from_user.id}.mp4"
+    input_path = f"input_{message.from_user.id}_{video_obj.file_id[:8]}.mp4"
+    output_path = f"compressed_{message.from_user.id}_{video_obj.file_id[:8]}.mp4"
     
     try:
         file_info = await bot.get_file(video_obj.file_id)
         await bot.download_file(file_info.file_path, input_path)
         
         orig_size = get_file_size_mb(input_path)
-        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی سریع...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
+        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی سنگین...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
 
-        # دستور ffmpeg فوق‌العاده سریع با حداقل فشار به CPU
+        # تنظیمات قاطع ffmpeg برای فشرده‌سازی حتی فایل‌های کوچک و سرعت حداکثری
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264',
-            '-crf', '32',                        
-            '-b:v', '450k',                      
-            '-preset', 'ultrafast',              # حداکثر سرعت ممکن
-            '-tune', 'fastdecode',              # بهینه‌سازی برای رمزگشایی و انکود سریع
-            '-vf', "scale='min(640,iw)':-2",    # کاهش رزولوشن به 360p/480p برای سرعت ۳ برابری
-            '-acodec', 'aac', '-b:a', '64k',    
+            '-maxrate', '380k',                  # سقف اجباری بیت‌ریت ویدیو برای کاهش قطعی حجم
+            '-bufsize', '760k',
+            '-crf', '32',
+            '-preset', 'ultrafast',              # سرعت فوق‌العاده بالا
+            '-tune', 'fastdecode',
+            '-vf', "scale='min(640,iw)':-2",    # مقیاس‌دهی رزولوشن
+            '-acodec', 'aac', '-b:a', '48k',    # فشرده‌سازی صدا
             output_path
         ]
 
@@ -87,21 +89,17 @@ async def compress_and_send(message: Message, video_obj):
 
         await process.wait()
 
-        if os.path.exists(output_path):
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             new_size = get_file_size_mb(output_path)
             
-            if new_size >= orig_size:
-                final_file_path = input_path
-                saved = 0
-                new_size = orig_size
-            else:
-                final_file_path = output_path
-                saved = int(((orig_size - new_size) / orig_size) * 100)
+            # اگر حجم جدید کمتر شد از فایل جدید استفاده کن، در غیر این صورت درصد واقعی نشان بده
+            final_file_path = output_path
+            saved = max(0, int(((orig_size - new_size) / orig_size) * 100))
 
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
             caption = (
-                f"✅ **فشرده‌سازی با موفقیت انجام شد!**\n\n"
+                f"✅ **فشرده‌سازی انجام شد!**\n\n"
                 f"📦 حجم اولیه: `{orig_size:.1f} MB`\n"
                 f"📉 حجم جدید: `{new_size:.1f} MB`\n"
                 f"⚡ میزان کاهش حجم: `{saved}%`"
@@ -110,13 +108,16 @@ async def compress_and_send(message: Message, video_obj):
             video_file = FSInputFile(final_file_path)
             await message.reply_video(video=video_file, caption=caption, parse_mode="Markdown")
         else:
-            await message.reply("❌ خطا در ایجاد فایل خروجی.")
+            await message.reply("❌ خطا در پردازش فایل خروجی.")
 
     except Exception as e:
-        await message.reply(f"❌ **خطا:** {str(e)}")
+        await message.reply(f"❌ **خطا در دریافت یا پردازش:** {str(e)}")
 
     finally:
-        await status_msg.delete()
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
         if os.path.exists(input_path): os.remove(input_path)
         if os.path.exists(output_path): os.remove(output_path)
 
@@ -129,7 +130,6 @@ async def send_welcome(message: Message):
         "📌 برای ویدیوهای زیر ۱۰ مگابایت، دستور `/compress` را روی ویدیو ریپلای کنید."
     )
 
-# پردازش دستی با ریپلای دستور /compress
 @dp.message(Command("compress"))
 async def handle_compress_command(message: Message):
     if not message.reply_to_message:
@@ -149,16 +149,13 @@ async def handle_compress_command(message: Message):
 
     await compress_and_send(message, video_obj)
 
-# پردازش خودکار فقط برای ویدیوها و فایل‌های ویدیویی بالای ۱۰ مگابایت
 @dp.message(F.video | F.document)
 async def handle_auto_video(message: Message):
     video_obj = message.video or message.document
 
-    # نادیده گرفتن عکس، گیف و فایل‌های غیر ویدیویی
     if message.document and not (message.document.mime_type and message.document.mime_type.startswith("video/")):
         return
 
-    # شرط حجم بالای ۱۰ مگابایت برای پردازش خودکار
     ten_mb = 10 * 1024 * 1024
     if video_obj.file_size >= ten_mb:
         await compress_and_send(message, video_obj)
@@ -182,3 +179,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

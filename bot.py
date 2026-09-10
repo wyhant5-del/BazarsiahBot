@@ -4,7 +4,7 @@ import os
 import re
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiohttp import web
 
 BOT_TOKEN = "8895497755:AAEAjZeyp6x_Vt_NPTQrgM0K8kP1l7ZnHbE"
@@ -15,20 +15,9 @@ dp = Dispatcher()
 def get_file_size_mb(file_path):
     return os.path.getsize(file_path) / (1024 * 1024)
 
-@dp.message(CommandStart())
-async def send_welcome(message: Message):
-    await message.reply(
-        "👋 **به ربات فشرده‌ساز ویدیو خوش آمدید!**\n\n"
-        "🎬 ویدیوی خود را ارسال کنید (حداکثر ۵۰ مگابایت) تا فشرده‌سازی انجام شود."
-    )
-
-@dp.message(F.video | F.document)
-async def handle_video(message: Message):
-    video_obj = message.video or message.document
-    if message.document and not (message.document.mime_type and message.document.mime_type.startswith("video/")):
-        await message.reply("⚠️ لطفاً فقط فایل ویدیویی ارسال کنید.")
-        return
-
+async def compress_and_send(message: Message, video_obj):
+    orig_size_mb = video_obj.file_size / (1024 * 1024)
+    
     if video_obj.file_size > 50 * 1024 * 1024:
         await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است.")
         return
@@ -43,17 +32,18 @@ async def handle_video(message: Message):
         await bot.download_file(file_info.file_path, input_path)
         
         orig_size = get_file_size_mb(input_path)
-        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی سنگین...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
+        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی سریع...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
 
-        # تنظیمات برای فشرده‌سازی بسیار بالا و سرعت بیشتر
+        # دستور ffmpeg فوق‌العاده سریع با حداقل فشار به CPU
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264',
-            '-crf', '34',                        # فشرده‌سازی شدید
-            '-b:v', '500k',                      # سقف بیت‌ریت تصویر
-            '-preset', 'ultrafast',              # حداکثر سرعت پردازش
-            '-vf', "scale='min(854,iw)':-2",    # کاهش رزولوشن به 480p برای سرعت بیشتر
-            '-acodec', 'aac', '-b:a', '64k',    # فشرده‌سازی صدا
+            '-crf', '32',                        
+            '-b:v', '450k',                      
+            '-preset', 'ultrafast',              # حداکثر سرعت ممکن
+            '-tune', 'fastdecode',              # بهینه‌سازی برای رمزگشایی و انکود سریع
+            '-vf', "scale='min(640,iw)':-2",    # کاهش رزولوشن به 360p/480p برای سرعت ۳ برابری
+            '-acodec', 'aac', '-b:a', '64k',    
             output_path
         ]
 
@@ -111,7 +101,7 @@ async def handle_video(message: Message):
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
             caption = (
-                f"✅ **فشرده‌سازی انجام شد!**\n\n"
+                f"✅ **فشرده‌سازی با موفقیت انجام شد!**\n\n"
                 f"📦 حجم اولیه: `{orig_size:.1f} MB`\n"
                 f"📉 حجم جدید: `{new_size:.1f} MB`\n"
                 f"⚡ میزان کاهش حجم: `{saved}%`"
@@ -129,6 +119,49 @@ async def handle_video(message: Message):
         await status_msg.delete()
         if os.path.exists(input_path): os.remove(input_path)
         if os.path.exists(output_path): os.remove(output_path)
+
+
+@dp.message(CommandStart())
+async def send_welcome(message: Message):
+    await message.reply(
+        "👋 **به ربات فشرده‌ساز ویدیو خوش آمدید!**\n\n"
+        "🎬 ویدیوهای بالای ۱۰ مگابایت به صورت خودکار فشرده می‌شوند.\n"
+        "📌 برای ویدیوهای زیر ۱۰ مگابایت، دستور `/compress` را روی ویدیو ریپلای کنید."
+    )
+
+# پردازش دستی با ریپلای دستور /compress
+@dp.message(Command("compress"))
+async def handle_compress_command(message: Message):
+    if not message.reply_to_message:
+        await message.reply("⚠️ لطفاً دستور `/compress` را روی یک ویدیو ریپلای کنید.")
+        return
+
+    reply_msg = message.reply_to_message
+    video_obj = reply_msg.video or reply_msg.document
+
+    if not video_obj:
+        await message.reply("⚠️ پیام ریپلای شده حاوی ویدیو نیست.")
+        return
+
+    if reply_msg.document and not (reply_msg.document.mime_type and reply_msg.document.mime_type.startswith("video/")):
+        await message.reply("⚠️ لطفاً دستور را فقط روی فایل‌های ویدیویی ریپلای کنید.")
+        return
+
+    await compress_and_send(message, video_obj)
+
+# پردازش خودکار فقط برای ویدیوها و فایل‌های ویدیویی بالای ۱۰ مگابایت
+@dp.message(F.video | F.document)
+async def handle_auto_video(message: Message):
+    video_obj = message.video or message.document
+
+    # نادیده گرفتن عکس، گیف و فایل‌های غیر ویدیویی
+    if message.document and not (message.document.mime_type and message.document.mime_type.startswith("video/")):
+        return
+
+    # شرط حجم بالای ۱۰ مگابایت برای پردازش خودکار
+    ten_mb = 10 * 1024 * 1024
+    if video_obj.file_size >= ten_mb:
+        await compress_and_send(message, video_obj)
 
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
@@ -149,4 +182,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

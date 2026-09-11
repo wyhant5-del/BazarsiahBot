@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command, CommandStart
@@ -25,23 +26,32 @@ async def compress_and_send(message: Message, video_obj):
     input_path = f"input_{message.from_user.id}_{video_obj.file_id[:6]}.mp4"
     output_path = f"compressed_{message.from_user.id}_{video_obj.file_id[:6]}.mp4"
     
+    start_total_time = time.time()
+    
     try:
+        # ۱. مرحله دانلود
+        start_dl_time = time.time()
         file_info = await bot.get_file(video_obj.file_id)
         await bot.download(file=file_info, destination=input_path)
+        dl_duration = time.time() - start_dl_time
         
         orig_size = get_file_size_mb(input_path)
-        await status_msg.edit_text(f"⚙️ **شروع فشرده‌سازی باکیفیت...**\n📏 حجم اولیه: `{orig_size:.1f} MB`")
+        dl_speed = orig_size / dl_duration if dl_duration > 0 else 0
 
-        # تنظیمات بهینه جهت حفظ شفافیت تصویر و جلوگیری از پرپر زدن
+        await status_msg.edit_text(
+            f"⚙️ **شروع فشرده‌سازی با کدک پیشرفته libx265...**\n"
+            f"📏 حجم اولیه: `{orig_size:.2f} MB`"
+        )
+
+        # ۲. مرحله فشرده‌سازی با libx265 (مشابه ربات حرفه‌ای)
+        start_compress_time = time.time()
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
-            '-vcodec', 'libx264',
-            '-crf', '27',                        # کیفیت عالی و بدون افت محسوس
-            '-maxrate', '700k',                  # سقف بیت‌ریت مناسب جهت جلوگیری از خراب شدن فریم‌ها
-            '-bufsize', '1400k',
-            '-preset', 'ultrafast',              # سرعت پردازش بالا
-            '-vf', "scale='min(720,iw)':-2",    # رزولوشن استاندارد ۷۲۰p برای شفافیت کامل
-            '-acodec', 'aac', '-b:a', '96k',    
+            '-vcodec', 'libx265',              # کدک قدرتمند H.265
+            '-crf', '30',                      # مقدار CRF ایده‌آل برای x265
+            '-preset', 'veryfast',             # سرعت و فشرده‌سازی بسیار بالا
+            '-tag:v', 'hvc1',                  # جهت پخش بدون مشکل در آیفون و تمام دستگاه‌ها
+            '-acodec', 'aac', '-b:a', '96k',   # فشرده‌سازی بهینه صدا
             output_path
         ]
 
@@ -77,13 +87,14 @@ async def compress_and_send(message: Message, video_obj):
                     last_update_time = now
                     try:
                         await status_msg.edit_text(
-                            f"⚙️ **در حال فشرده‌سازی:** `{percent}%`\n"
+                            f"⚙️ **در حال فشرده‌سازی (H.265):** `{percent}%`\n"
                             f"📊 [{('▓' * (percent // 10)).ljust(10, '░')}]"
                         )
                     except Exception:
                         pass
 
         await process.wait()
+        compress_duration = time.time() - start_compress_time
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             new_size = get_file_size_mb(output_path)
@@ -94,18 +105,29 @@ async def compress_and_send(message: Message, video_obj):
                 new_size = orig_size
             else:
                 final_file_path = output_path
-                saved = int(((orig_size - new_size) / orig_size) * 100)
+                saved = round(((orig_size - new_size) / orig_size) * 100, 2)
 
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
+            # ۳. مرحله آپلود
+            start_ul_time = time.time()
+            video_file = FSInputFile(final_file_path)
+            
+            ul_duration = time.time() - start_ul_time
+            ul_speed = new_size / ul_duration if ul_duration > 0 else 0
+            total_duration = time.time() - start_total_time
+
+            # متن گزارش دقیق مشابه نمونه
             caption = (
-                f"✅ **فشرده‌سازی با موفقیت انجام شد!**\n\n"
-                f"📦 حجم اولیه: `{orig_size:.1f} MB`\n"
-                f"📉 حجم جدید: `{new_size:.1f} MB`\n"
-                f"⚡ میزان کاهش حجم: `{saved}%`"
+                f"📦 `{orig_size:.2f} مگابایت` -> `{new_size:.2f} مگابایت`\n"
+                f"⚡ `{saved}%` فشرده شد\n"
+                f"🎬 با **CRF 30** کدک **libx265** پریست **veryfast**\n"
+                f"📥 دانلود: `{dl_duration:.2f} ثانیه` (`{dl_speed:.2f} MB/s`)\n"
+                f"⚙️ فشرده‌سازی: `{compress_duration:.2f} ثانیه`\n"
+                f"📤 آپلود: `{ul_duration:.2f} ثانیه` (`{ul_speed:.2f} MB/s`)\n"
+                f"⏱ کل: `{total_duration:.2f} ثانیه`"
             )
             
-            video_file = FSInputFile(final_file_path)
             await message.reply_video(video=video_file, caption=caption, parse_mode="Markdown")
         else:
             await message.reply("❌ خطا در ایجاد فایل خروجی.")

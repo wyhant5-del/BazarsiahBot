@@ -29,7 +29,7 @@ async def compress_and_send(message: Message, video_obj):
     start_total_time = time.time()
     
     try:
-        # ۱. مرحله دانلود
+        # ۱. دانلود ویدیو
         start_dl_time = time.time()
         file_info = await bot.get_file(video_obj.file_id)
         await bot.download(file=file_info, destination=input_path)
@@ -39,28 +39,27 @@ async def compress_and_send(message: Message, video_obj):
         dl_speed = orig_size / dl_duration if dl_duration > 0 else 0
 
         await status_msg.edit_text(
-            f"⚙️ **شروع فشرده‌سازی با کدک libx265...**\n"
+            f"⚙️ **شروع فشرده‌سازی سریع...**\n"
             f"📏 حجم اولیه: `{orig_size:.2f} MB`"
         )
 
-        # ۲. مرحله فشرده‌سازی با libx265
+        # ۲. فشرده‌سازی با سرعت فوق‌العاده بالا و کیفیت مناسب (libx264)
         start_compress_time = time.time()
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
-            '-vcodec', 'libx265',              # کدک مدرن H.265
-            '-crf', '30',                      # CRF استاندارد x265
-            '-preset', 'veryfast',             # سرعت و فشرده‌سازی بسیار بالا
-            '-tag:v', 'hvc1',                  # سازگاری کامل با تمام دستگاه‌ها و آیفون
+            '-vcodec', 'libx264',              # کدک بسیار سریع و سازگار
+            '-crf', '28',                      # حفظ کیفیت و جلوگیری از خراب شدن تصویر
+            '-preset', 'ultrafast',             # حداکثر سرعت پردازش در سرور
+            '-vf', "scale='min(720,iw)':-2",    # رزولوشن مناسب ۷۲۰p
             '-acodec', 'aac', '-b:a', '96k',   
             output_path
         ]
 
-        # استفاده از limit بزرگتر برای جلوگیری از ارور chunk exceed limit
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=1024 * 1024  # ۱ مگابایت بفر برای خروجی خطوط ffmpeg
+            limit=1024 * 1024
         )
 
         last_update_time = 0
@@ -93,7 +92,7 @@ async def compress_and_send(message: Message, video_obj):
                     last_update_time = now
                     try:
                         await status_msg.edit_text(
-                            f"⚙️ **در حال فشرده‌سازی (H.265):** `{percent}%`\n"
+                            f"⚙️ **در حال فشرده‌سازی:** `{percent}%`\n"
                             f"📊 [{('▓' * (percent // 10)).ljust(10, '░')}]"
                         )
                     except Exception:
@@ -115,7 +114,7 @@ async def compress_and_send(message: Message, video_obj):
 
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
             
-            # ۳. مرحله آپلود
+            # ۳. آپلود
             start_ul_time = time.time()
             video_file = FSInputFile(final_file_path)
             
@@ -126,7 +125,7 @@ async def compress_and_send(message: Message, video_obj):
             caption = (
                 f"📦 `{orig_size:.2f} مگابایت` -> `{new_size:.2f} مگابایت`\n"
                 f"⚡ `{saved}%` فشرده شد\n"
-                f"🎬 با **CRF 30** کدک **libx265** پریست **veryfast**\n"
+                f"🎬 با **CRF 28** کدک **libx264** پریست **ultrafast**\n"
                 f"📥 دانلود: `{dl_duration:.2f} ثانیه` (`{dl_speed:.2f} MB/s`)\n"
                 f"⚙️ فشرده‌سازی: `{compress_duration:.2f} ثانیه`\n"
                 f"📤 آپلود: `{ul_duration:.2f} ثانیه` (`{ul_speed:.2f} MB/s`)\n"

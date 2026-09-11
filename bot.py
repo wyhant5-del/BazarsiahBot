@@ -39,33 +39,39 @@ async def compress_and_send(message: Message, video_obj):
         dl_speed = orig_size / dl_duration if dl_duration > 0 else 0
 
         await status_msg.edit_text(
-            f"⚙️ **شروع فشرده‌سازی با کدک پیشرفته libx265...**\n"
+            f"⚙️ **شروع فشرده‌سازی با کدک libx265...**\n"
             f"📏 حجم اولیه: `{orig_size:.2f} MB`"
         )
 
-        # ۲. مرحله فشرده‌سازی با libx265 (مشابه ربات حرفه‌ای)
+        # ۲. مرحله فشرده‌سازی با libx265
         start_compress_time = time.time()
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
-            '-vcodec', 'libx265',              # کدک قدرتمند H.265
-            '-crf', '30',                      # مقدار CRF ایده‌آل برای x265
+            '-vcodec', 'libx265',              # کدک مدرن H.265
+            '-crf', '30',                      # CRF استاندارد x265
             '-preset', 'veryfast',             # سرعت و فشرده‌سازی بسیار بالا
-            '-tag:v', 'hvc1',                  # جهت پخش بدون مشکل در آیفون و تمام دستگاه‌ها
-            '-acodec', 'aac', '-b:a', '96k',   # فشرده‌سازی بهینه صدا
+            '-tag:v', 'hvc1',                  # سازگاری کامل با تمام دستگاه‌ها و آیفون
+            '-acodec', 'aac', '-b:a', '96k',   
             output_path
         ]
 
+        # استفاده از limit بزرگتر برای جلوگیری از ارور chunk exceed limit
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            limit=1024 * 1024  # ۱ مگابایت بفر برای خروجی خطوط ffmpeg
         )
 
         last_update_time = 0
         duration = None
 
         while True:
-            line = await process.stderr.readline()
+            try:
+                line = await process.stderr.readline()
+            except Exception:
+                break
+
             if not line:
                 break
             line_str = line.decode('utf-8', errors='ignore')
@@ -117,7 +123,6 @@ async def compress_and_send(message: Message, video_obj):
             ul_speed = new_size / ul_duration if ul_duration > 0 else 0
             total_duration = time.time() - start_total_time
 
-            # متن گزارش دقیق مشابه نمونه
             caption = (
                 f"📦 `{orig_size:.2f} مگابایت` -> `{new_size:.2f} مگابایت`\n"
                 f"⚡ `{saved}%` فشرده شد\n"

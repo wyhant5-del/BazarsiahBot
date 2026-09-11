@@ -17,8 +17,8 @@ dp = Dispatcher()
 def get_file_size_mb(file_path):
     return os.path.getsize(file_path) / (1024 * 1024)
 
-async def get_video_bitrate(file_path):
-    """استخراج بیت‌ریت واقعی ویدیو ورودی"""
+async def get_video_info(file_path):
+    """استخراج بیت‌ریت و مدت زمان دقیق ویدیو"""
     cmd = [
         'ffprobe', '-v', 'quiet', '-print_format', 'json',
         '-show_format', '-show_streams', file_path
@@ -27,19 +27,21 @@ async def get_video_bitrate(file_path):
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         data = json.loads(stdout.decode('utf-8'))
+        
+        duration = float(data.get('format', {}).get('duration', 0))
         bitrate = int(data.get('format', {}).get('bit_rate', 0))
-        if not bitrate:
-            for stream in data.get('streams', []):
-                if stream.get('codec_type') == 'video':
-                    bitrate = int(stream.get('bit_rate', 0))
-                    break
-        return bitrate
+        
+        if not bitrate and duration > 0:
+            file_bytes = os.path.getsize(file_path)
+            bitrate = int((file_bytes * 8) / duration)
+            
+        return bitrate, duration
     except Exception:
-        return 0
+        return 0, 0
 
 async def compress_and_send(message: Message, video_obj):
     if video_obj.file_size > 50 * 1024 * 1024:
-        await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است. محدودیت ربات ۵0 مگابایت می‌باشد.")
+        await message.reply("❌ حجم ویدیو بیشتر از ۵۰ مگابایت است. محدودیت ربات ۵۰ مگابایت می‌باشد.")
         return
 
     status_msg = await message.reply("📥 **در حال دریافت ویدیو از تلگرام...**")
@@ -60,36 +62,36 @@ async def compress_and_send(message: Message, video_obj):
         dl_speed = orig_size / dl_duration if dl_duration > 0 else 0
 
         await status_msg.edit_text(
-            f"⚙️ **تحلیل ویدیو و شروع فشرده‌سازی هوشمند...**\n"
+            f"⚙️ **تحلیل متادیتای ویدیو...**\n"
             f"📏 حجم اولیه: `{orig_size:.2f} MB`"
         )
 
-        # ۲. محاسبه بیت‌ریت هدف برای تضمین کاهش حجم حداقل ۴۰ درصدی
-        input_bitrate = await get_video_bitrate(input_path)
+        # ۲. محاسبه بیت‌ریت برای هدف‌گذاری فشرده‌سازی ۵۰٪ تا ۶۰٪
+        input_bitrate, duration_sec = await get_video_info(input_path)
         
-        # اگر بیت‌ریت شناسایی شد، سقف بیت‌ریت رو ۶۰٪ فایل ورودی میذاریم
-        target_maxrate = None
+        # تعیین بیت‌ریت هدف (حدود ۴۵٪ بیت‌ریت ورودی برای نصف کردن حجم)
         if input_bitrate > 0:
-            target_maxrate = int((input_bitrate * 0.6) / 1000) # به kbps
-            if target_maxrate < 250:
-                target_maxrate = 250 # حداقل بیت‌ریت برای عدم افت شدید کیفیت
+            target_bitrate = int((input_bitrate * 0.45) / 1000) # kbps
+        else:
+            target_bitrate = 400 # مقدار پیش‌فرض استاندارد
+            
+        if target_bitrate < 200:
+            target_bitrate = 200  # حداقل بیت‌ریت برای حفظ شفافیت
 
         start_compress_time = time.time()
         
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264',
-            '-crf', '29',                        # متعادل‌ترین حالت کیفیت/حجم
-            '-preset', 'ultrafast',             # سرعت بسیار بالا
-            '-vf', "scale='min(720,iw)':-2",    # بهینه‌سازی رزولوشن
-            '-acodec', 'aac', '-b:a', '96k'
+            '-b:v', f'{target_bitrate}k',         # بیت‌ریت هدف برای کاهش ۵۰٪ حجم
+            '-maxrate', f'{int(target_bitrate * 1.3)}k',
+            '-bufsize', f'{int(target_bitrate * 2)}k',
+            '-preset', 'ultrafast',                # سرعت بالای پردازش
+            '-vf', "scale='min(720,iw)':-2",       # بهینه‌سازی رزولوشن به ۷۲۰p
+            '-acodec', 'aac', '-b:a', '64k',      # فشرده‌سازی بهینه صدا
+            '-movflags', '+faststart',            # اصلاح متادیتا جهت پخش آنی و سالم در تلگرام
+            output_path
         ]
-
-        # اعمال سقف بیت‌ریت دینامیک در صورت نیاز برای جلوگیری از ۰٪ شدن
-        if target_maxrate:
-            cmd.extend(['-maxrate', f'{target_maxrate}k', '-bufsize', f'{target_maxrate * 2}k'])
-
-        cmd.append(output_path)
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -99,7 +101,6 @@ async def compress_and_send(message: Message, video_obj):
         )
 
         last_update_time = 0
-        duration = None
 
         while True:
             try:
@@ -111,24 +112,24 @@ async def compress_and_send(message: Message, video_obj):
                 break
             line_str = line.decode('utf-8', errors='ignore')
 
-            if not duration:
+            if duration_sec <= 0:
                 dur_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", line_str)
                 if dur_match:
                     h, m, s = map(float, dur_match.groups())
-                    duration = h * 3600 + m * 60 + s
+                    duration_sec = h * 3600 + m * 60 + s
 
             time_match = re.search(r"time=(\d+):(\d+):(\d+\.\d+)", line_str)
-            if time_match and duration and duration > 0:
+            if time_match and duration_sec > 0:
                 h, m, s = map(float, time_match.groups())
                 elapsed = h * 3600 + m * 60 + s
-                percent = min(100, int((elapsed / duration) * 100))
+                percent = min(100, int((elapsed / duration_sec) * 100))
 
                 now = asyncio.get_event_loop().time()
                 if now - last_update_time > 3:
                     last_update_time = now
                     try:
                         await status_msg.edit_text(
-                            f"⚙️ **در حال فشرده‌سازی هوشمند:** `{percent}%`\n"
+                            f"⚙️ **در حال فشرده‌سازی سنگین:** `{percent}%`\n"
                             f"📊 [{('▓' * (percent // 10)).ljust(10, '░')}]"
                         )
                     except Exception:
@@ -140,7 +141,6 @@ async def compress_and_send(message: Message, video_obj):
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             new_size = get_file_size_mb(output_path)
             
-            # اگر به هر دلیلی حجم بیشتر شد، فایل اصلی رو می‌فرسته
             if new_size >= orig_size:
                 final_file_path = input_path
                 saved = 0
@@ -162,7 +162,7 @@ async def compress_and_send(message: Message, video_obj):
             caption = (
                 f"📦 `{orig_size:.2f} مگابایت` -> `{new_size:.2f} مگابایت`\n"
                 f"⚡ `{saved}%` فشرده شد\n"
-                f"🎬 الگوریتم فشرده‌سازی هوشمند **Smart-x264**\n"
+                f"🎬 فرمول فشرده‌سازی بیت‌ریت هدف **(Target-Bitrate)**\n"
                 f"📥 دانلود: `{dl_duration:.2f} ثانیه` (`{dl_speed:.2f} MB/s`)\n"
                 f"⚙️ فشرده‌سازی: `{compress_duration:.2f} ثانیه`\n"
                 f"📤 آپلود: `{ul_duration:.2f} ثانیه` (`{ul_speed:.2f} MB/s`)\n"

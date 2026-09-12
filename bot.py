@@ -13,8 +13,12 @@ BOT_TOKEN = "8895497755:AAEAjZeyp6x_Vt_NPTQrgM0K8kP1l7ZnHbE"
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+logging.basicConfig(level=logging.INFO)
+
+
 def get_file_size_mb(file_path):
     return os.path.getsize(file_path) / (1024 * 1024)
+
 
 async def compress_and_send(message: Message, video_obj):
     if video_obj.file_size > 50 * 1024 * 1024:
@@ -22,22 +26,21 @@ async def compress_and_send(message: Message, video_obj):
         return
 
     status_msg = await message.reply("📥 **در حال دریافت ویدیو از تلگرام...**")
-    
+
     input_path = f"input_{message.from_user.id}_{video_obj.file_id[:6]}.mp4"
     output_path = f"compressed_{message.from_user.id}_{video_obj.file_id[:6]}.mp4"
-    
+
     start_total_time = time.time()
-    
+
     try:
-        # ۱. دانلود ویدیو
+        # ۱. دانلود ویدیو از تلگرام
         start_dl_time = time.time()
         file_info = await bot.get_file(video_obj.file_id)
         await bot.download(file=file_info, destination=input_path)
         dl_duration = time.time() - start_dl_time
-        
-        # محاسبه حجم واقعی فایل دانلود شده روی دیسک
+
+        # محاسبه حجم واقعی روی دیسک (بدون دروغ!)
         orig_size = get_file_size_mb(input_path)
-        dl_speed = orig_size / dl_duration if dl_duration > 0 else 0
 
         await status_msg.edit_text(
             f"⚙️ **در حال فشرده‌سازی ویدیو...**\n"
@@ -45,16 +48,16 @@ async def compress_and_send(message: Message, video_obj):
         )
 
         start_compress_time = time.time()
-        
-        # دستور کاملاً استاندارد فشرده‌سازی FFmpeg
+
+        # ۲. اجرا دستور استاندارد فشرده‌سازی
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-vcodec', 'libx264',
-            '-crf', '30',                         # کاهش حجم واقع بینانه و واقعی (۴۰٪ تا ۶۰٪)
-            '-preset', 'veryfast',               # تعادل عالی بین سرعت و کیفیت
-            '-vf', "scale='min(720,iw)':-2",       # استانداردسازی رزولوشن به ۷۲۰p
-            '-acodec', 'aac', '-b:a', '96k',      # بیت‌ریت صدای استاندارد
-            '-movflags', '+faststart',            # اصلاح متادیتا برای پخش بدون مشکل در تلگرام
+            '-crf', '30',
+            '-preset', 'veryfast',
+            '-vf', "scale='min(720,iw)':-2",
+            '-acodec', 'aac', '-b:a', '96k',
+            '-movflags', '+faststart',
             output_path
         ]
 
@@ -67,7 +70,9 @@ async def compress_and_send(message: Message, video_obj):
 
         last_update_time = 0
         duration_sec = 0
+        stderr_lines = []  # برای دیباگ - کل خروجی خطای ffmpeg رو نگه می‌داریم
 
+        # خوندن لاگ FFmpeg برای نمایش درصد پیشرفت
         while True:
             try:
                 line = await process.stderr.readline()
@@ -77,6 +82,7 @@ async def compress_and_send(message: Message, video_obj):
             if not line:
                 break
             line_str = line.decode('utf-8', errors='ignore')
+            stderr_lines.append(line_str)
 
             if duration_sec <= 0:
                 dur_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", line_str)
@@ -104,10 +110,21 @@ async def compress_and_send(message: Message, video_obj):
         await process.wait()
         compress_duration = time.time() - start_compress_time
 
+        # ۲.۵ چک کردن اینکه ffmpeg واقعاً بدون خطا تموم شده باشه
+        if process.returncode != 0:
+            error_tail = "".join(stderr_lines[-15:])  # ۱۵ خط آخر لاگ خطا
+            logging.error(f"FFmpeg failed (code {process.returncode}) for user {message.from_user.id}:\n{error_tail}")
+            await status_msg.edit_text(
+                f"❌ **خطا در فشرده‌سازی (کد {process.returncode})**\n"
+                f"این خطا توی لاگ سرور ثبت شد."
+            )
+            return
+
+        # ۳. چک کردن خروجی و ارسال ویدیو
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             new_size = get_file_size_mb(output_path)
-            
-            # اگر فایل فشرده‌شده به هر دلیلی حجیم‌تر از اصلش شد
+
+            # اگر به هر دلیلی فایل فشرده بزرگتر شد، اصل فایل رو بفرست
             if new_size >= orig_size:
                 final_file_path = input_path
                 saved = 0
@@ -117,13 +134,11 @@ async def compress_and_send(message: Message, video_obj):
                 saved = round(((orig_size - new_size) / orig_size) * 100, 2)
 
             await status_msg.edit_text("📤 **فشرده‌سازی تمام شد. در حال آپلود...**")
-            
-            # ۳. آپلود
+
             start_ul_time = time.time()
             video_file = FSInputFile(final_file_path)
-            
+
             ul_duration = time.time() - start_ul_time
-            ul_speed = new_size / ul_duration if ul_duration > 0 else 0
             total_duration = time.time() - start_total_time
 
             caption = (
@@ -134,12 +149,15 @@ async def compress_and_send(message: Message, video_obj):
                 f"📤 آپلود: `{ul_duration:.2f} ثانیه`\n"
                 f"⏱ زمان کل: `{total_duration:.2f} ثانیه`"
             )
-            
+
             await message.reply_video(video=video_file, caption=caption, parse_mode="Markdown")
         else:
+            error_tail = "".join(stderr_lines[-15:])
+            logging.error(f"Output file missing/empty for user {message.from_user.id}:\n{error_tail}")
             await message.reply("❌ خطا در ایجاد فایل خروجی.")
 
     except Exception as e:
+        logging.exception("Unexpected error in compress_and_send")
         await message.reply(f"❌ **خطا:** {str(e)}")
 
     finally:
@@ -147,8 +165,11 @@ async def compress_and_send(message: Message, video_obj):
             await status_msg.delete()
         except Exception:
             pass
-        if os.path.exists(input_path): os.remove(input_path)
-        if os.path.exists(output_path): os.remove(output_path)
+        # پاکسازی فایل‌های موقت روی سرور جهت پر نشدن حافظه
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        if os.path.exists(output_path):
+            os.remove(output_path)
 
 
 @dp.message(CommandStart())
@@ -158,6 +179,7 @@ async def send_welcome(message: Message):
         "🎬 ویدیوهای بالای ۱۰ مگابایت به صورت خودکار فشرده می‌شوند.\n"
         "📌 برای ویدیوهای زیر ۱۰ مگابایت، دستور `/compress` را روی ویدیو ریپلای کنید."
     )
+
 
 @dp.message(Command("compress"))
 async def handle_compress_command(message: Message):
@@ -178,6 +200,7 @@ async def handle_compress_command(message: Message):
 
     await compress_and_send(message, video_obj)
 
+
 @dp.message(F.video | F.document)
 async def handle_auto_video(message: Message):
     video_obj = message.video or message.document
@@ -189,8 +212,10 @@ async def handle_auto_video(message: Message):
     if video_obj.file_size >= ten_mb:
         await compress_and_send(message, video_obj)
 
+
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
+
 
 async def start_dummy_server():
     app = web.Application()
@@ -201,10 +226,11 @@ async def start_dummy_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
+
 async def main():
-    logging.basicConfig(level=logging.INFO)
     await start_dummy_server()
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
